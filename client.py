@@ -23,11 +23,13 @@ class TCPClient:
 
     def update_state(self, packet, outgoing=False):
         if outgoing:
-            # State transitions caused by sending packets
+            # Outgoing state transitions
             if packet.flags.get('SYN', 0) and not packet.flags.get('ACK', 0) and self.state == 'CLOSED':
                 self.state = 'SYN-SENT'
+            elif packet.flags.get('FIN', 0) and self.state == 'ESTABLISHED':
+                self.state = 'FIN-WAIT-1'
         else:
-            # State transitions caused by receiving packets
+            # Incoming state transitions
             if packet.flags.get('SYN', 0) and packet.flags.get('ACK', 0):
                 self.state = 'SYN-ACK-RECEIVED'
                 self.ack_num = packet.seq_num + 1
@@ -36,8 +38,12 @@ class TCPClient:
             elif packet.flags.get('PSH', 0):
                 self.state = 'DATA-RECEIVED'
                 self.ack_num = packet.seq_num + len(packet.payload)
-
-        print(f"Client state changed to {self.state}")
+            elif packet.flags.get('ACK', 0) and self.state == 'FIN-WAIT-1':
+                self.state = 'FIN-WAIT-2'
+            elif packet.flags.get('FIN', 0):
+                # Respond to server FIN
+                self.ack_num = packet.seq_num + 1
+                self.state = 'TIME-WAIT'
 
     def send_data(self, payload, dst_port, network):
         if self.state != 'ESTABLISHED':
@@ -49,8 +55,11 @@ class TCPClient:
         self.send_packet(packet, network)
         self.seq_num += len(payload)  # increment seq_num by payload length
 
-
-
+    def terminate_connection(self, dst_port, network):
+        print("Client initiating termination")
+        fin_packet = self.create_packet(flags={'FIN': 1, 'ACK': 1}, dst_port=dst_port)
+        self.send_packet(fin_packet, network)
+        print("Client → Sent FIN")
 
     def send_packet(self, packet, network):
         # ensure dst_port is set on the packet (caller should have set it)
@@ -78,11 +87,20 @@ class TCPClient:
                 self.ack_num = packet.seq_num + 1
                 # send final ACK to complete handshake
                 ack_packet = self.create_packet(flags={'ACK': 1}, dst_port=packet.src_port)
-                self.send_packet(ack_packet, network)  # replaced in sim by real network binding
+                self.send_packet(ack_packet, network)
+                self.state = 'ESTABLISHED'
                 print("Client → Sent ACK to complete handshake")
 
         # For any pure ACKs (later data exchange)
         elif packet.flags.get('ACK', 0):
             self.ack_num = packet.seq_num + 1
             print("Client → ACK received and processed")
+
+        # Server sent FIN
+        if packet.flags.get('FIN', 0):
+            ack_packet = self.create_packet(flags={'ACK': 1}, dst_port=packet.src_port)
+            self.send_packet(ack_packet, network)
+            self.state = 'TIME-WAIT'
+            print("Client → Sent ACK for server FIN, state TIME-WAIT")
+
 

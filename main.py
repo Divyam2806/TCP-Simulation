@@ -46,3 +46,7 @@ print("\n[Simulation] Client → Sent data packet")
 print("\n[Simulation] Data transfer complete.")
 print(f"Client state: {client.state}")
 print(f"Server state: {server.state}")
+
+
+print("\n[Simulation] Initiating connection termination.")
+client.terminate_connection(dst_port=80, network=network)
